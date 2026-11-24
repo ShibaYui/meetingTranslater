@@ -1,0 +1,17 @@
+# local settings and personal data
+config.env
+glossary.txt
+transcripts/*
+!transcripts/.gitkeep
+logs/*
+!logs/.gitkeep
+
+# model weights (download with models/download.sh)
+models/*.bin
+models/*.part
+!models/.gitkeep
+
+# python / macOS
+__pycache__/
+*.pyc
+.DS_Store

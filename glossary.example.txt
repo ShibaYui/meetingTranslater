@@ -1,0 +1,16 @@
+# 會議詞彙表範例。複製成 glossary.txt 後依每場會議修改（glossary.txt 不會進 git）。
+#   English            → 保留英文原文，同時幫助語音辨識拼對專有名詞
+#   English = 中文      → 強制翻成指定中文
+# 以 # 開頭的行會被忽略。
+Kubernetes
+GPU
+API
+Q1
+Q2
+Q3
+Q4
+roadmap = 產品路線圖
+regression = 迴歸問題
+release branch = 發布分支
+action item = 待辦事項
+follow up = 後續追蹤

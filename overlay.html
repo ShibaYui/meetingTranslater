@@ -1,0 +1,159 @@
+<!doctype html>
+<html lang="zh-Hant">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Live Subtitles</title>
+<style>
+  :root { --fs: 34px; }
+  html, body { height: 100%; margin: 0; }
+  body {
+    background: #111; color: #f2f2f2; overflow: hidden; position: relative;
+    font-family: -apple-system, "PingFang TC", "Noto Sans TC", "Helvetica Neue", sans-serif;
+  }
+  #bar {
+    position: fixed; top: 0; left: 0; right: 0; height: 34px; z-index: 2;
+    display: flex; align-items: center; gap: 8px; padding: 0 10px;
+    background: rgba(0, 0, 0, .65); font-size: 13px;
+  }
+  #bar button {
+    background: #333; color: #eee; border: 0; border-radius: 6px;
+    padding: 4px 10px; cursor: pointer; font-size: 13px;
+  }
+  #bar button:hover { background: #484848; }
+  #status { color: #9ab; margin-left: auto; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  #host { position: absolute; left: 0; right: 0; top: 34px; bottom: 0; }
+  #subs {
+    position: absolute; left: 0; right: 0; bottom: 0; max-height: 100%;
+    box-sizing: border-box; padding: 10px 18px 14px; overflow: hidden;
+    display: flex; flex-direction: column; justify-content: flex-end; gap: 10px;
+  }
+  .seg { opacity: .5; }
+  .seg:last-child { opacity: 1; }
+  .zh { font-size: var(--fs); line-height: 1.3; font-weight: 600; word-break: break-word; }
+  .zh.pending:empty::before { content: "翻譯中…"; opacity: .5; font-weight: 400; }
+  .zh.pending:not(:empty)::after { content: "▍"; opacity: .6; }
+  .en { font-size: calc(var(--fs) * .5); color: #8fa3b8; margin-top: 2px; line-height: 1.3; }
+  .hint { color: #777; font-size: 14px; }
+</style>
+</head>
+<body>
+<div id="bar">
+  <button id="pip" title="開一個永遠置頂的浮動視窗，可放在 Teams 畫面上方">浮動置頂視窗</button>
+  <button id="smaller" title="縮小字體（或按 -）">A−</button>
+  <button id="bigger" title="放大字體（或按 +）">A+</button>
+  <button id="clear" title="清空畫面">清空</button>
+  <span id="status">連線中…</span>
+</div>
+<div id="host">
+  <div id="subs"><div class="hint">等待字幕… 播放聲音後會出現在這裡。</div></div>
+</div>
+<script>
+  const MAX_VISIBLE = 3;
+  const items = new Map();
+  const subs = document.getElementById('subs');
+  const statusEl = document.getElementById('status');
+  let docs = [document];
+  let fs = 34;
+  try { fs = parseInt(localStorage.getItem('subs-fs'), 10) || 34; } catch (e) {}
+
+  function status(msg) { statusEl.textContent = msg; }
+  function applyFs() { docs.forEach(d => d.documentElement.style.setProperty('--fs', fs + 'px')); }
+  function setFs(v) {
+    fs = Math.max(16, Math.min(96, v));
+    applyFs();
+    try { localStorage.setItem('subs-fs', String(fs)); } catch (e) {}
+  }
+
+  function render() {
+    const ids = [...items.keys()].sort((a, b) => a - b).slice(-MAX_VISIBLE);
+    const doc = subs.ownerDocument;
+    subs.innerHTML = '';
+    for (const id of ids) {
+      const it = items.get(id);
+      const seg = doc.createElement('div');
+      seg.className = 'seg';
+      const zh = doc.createElement('div');
+      zh.className = 'zh' + (it.done ? '' : ' pending');
+      zh.textContent = it.zh || '';
+      const en = doc.createElement('div');
+      en.className = 'en';
+      en.textContent = it.en || '';
+      seg.appendChild(zh);
+      seg.appendChild(en);
+      subs.appendChild(seg);
+    }
+  }
+
+  function handle(d) {
+    if (d.id == null) return;
+    let it = items.get(d.id);
+    if (!it) {
+      it = { id: d.id, t: d.t || '', en: '', zh: '', done: false };
+      items.set(d.id, it);
+    }
+    if (d.type === 'en') it.en = d.text;
+    if (d.type === 'zh') { it.zh = d.text; it.done = !!d.done; }
+    const ids = [...items.keys()].sort((a, b) => a - b);
+    while (ids.length > 30) items.delete(ids.shift());
+    render();
+  }
+
+  async function boot() {
+    applyFs();
+    try {
+      const st = await (await fetch('/state')).json();
+      st.forEach(it => items.set(it.id, it));
+      if (st.length) render();
+    } catch (e) {}
+    const es = new EventSource('/events');
+    es.onopen = () => status('已連線');
+    es.onerror = () => status('連線中斷，重試中…');
+    es.onmessage = e => handle(JSON.parse(e.data));
+  }
+
+  document.getElementById('bigger').onclick = () => setFs(fs + 4);
+  document.getElementById('smaller').onclick = () => setFs(fs - 4);
+  document.getElementById('clear').onclick = () => { items.clear(); render(); };
+  document.addEventListener('keydown', e => {
+    if (e.key === '+' || e.key === '=') setFs(fs + 4);
+    if (e.key === '-' || e.key === '_') setFs(fs - 4);
+  });
+
+  document.getElementById('pip').onclick = async () => {
+    if (!('documentPictureInPicture' in window)) {
+      status('此瀏覽器不支援浮動視窗（需 Chrome 116 以上）');
+      return;
+    }
+    try {
+      const pw = await documentPictureInPicture.requestWindow({ width: 960, height: 250 });
+      for (const ss of document.styleSheets) {
+        try {
+          const st = pw.document.createElement('style');
+          st.textContent = [...ss.cssRules].map(r => r.cssText).join('\n');
+          pw.document.head.appendChild(st);
+        } catch (e) {}
+      }
+      pw.document.body.appendChild(subs);
+      docs = [document, pw.document];
+      applyFs();
+      pw.document.addEventListener('keydown', e => {
+        if (e.key === '+' || e.key === '=') setFs(fs + 4);
+        if (e.key === '-' || e.key === '_') setFs(fs - 4);
+      });
+      pw.addEventListener('pagehide', () => {
+        document.getElementById('host').appendChild(subs);
+        docs = [document];
+        applyFs();
+        status('浮動視窗已關閉，字幕移回此分頁');
+      });
+      status('字幕顯示在浮動視窗中（拖到 Teams 畫面上方即可）');
+    } catch (e) {
+      status('無法開啟浮動視窗：' + e.message);
+    }
+  };
+
+  boot();
+</script>
+</body>
+</html>

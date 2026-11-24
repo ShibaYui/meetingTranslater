@@ -1,0 +1,18 @@
+# Tencent Hy-MT2 7B translation model for Ollama with a working chat template.
+# The 7B GGUF uses Hunyuan's <|startoftext|> / <|extra_0|> / <|eos|> tokens (different from the 1.8B GGUF),
+# and Ollama's auto-converted template does not work, so create the model from this file:
+#   ollama pull hf.co/tencent/Hy-MT2-7B-GGUF:Q4_K_M
+#   ollama create hy-mt2:7b -f models/Modelfile.hy-mt2-7b
+FROM hf.co/tencent/Hy-MT2-7B-GGUF:Q4_K_M
+TEMPLATE """{{- if .System }}<|startoftext|>{{ .System }}<|extra_4|>{{- end }}
+{{- range $i, $_ := .Messages }}
+{{- if eq .Role "user" }}{{ if not (and $.System (eq $i 0)) }}<|startoftext|>{{ end }}{{ .Content }}<|extra_0|>
+{{- else if eq .Role "assistant" }}{{ .Content }}<|eos|>
+{{- end }}
+{{- end }}"""
+PARAMETER stop <|eos|>
+PARAMETER stop <|endoftext|>
+PARAMETER temperature 0.7
+PARAMETER top_p 0.6
+PARAMETER top_k 20
+PARAMETER repeat_penalty 1.05
