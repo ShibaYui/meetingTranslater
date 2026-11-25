@@ -7,7 +7,7 @@ Pipeline (standard library only, no third-party Python packages):
       -> 16 kHz mono PCM -> energy-based VAD segmentation
       -> whisper.cpp server  (speech recognition, English)
       -> Ollama              (translation to Traditional Chinese)
-      -> terminal + browser overlay (SSE) + transcript files (.jsonl / .md)
+      -> terminal + browser overlay (SSE) + transcript files (.jsonl / .txt)
 
 Run `./run.sh start` to launch everything, or `python3 live_subs.py --help`.
 """
@@ -122,6 +122,31 @@ class Item:
     tr_ms: float = 0.0
     tr_first_ms: float = 0.0
     meta: dict = field(default_factory=dict)
+
+
+def format_stats(seg_s: float, asr_ms: float, tr_ms: float | None, tr_first_ms: float | None) -> str:
+    """Timing summary shown under each sentence, e.g. 'seg 2.8s · asr 0.5s · 翻譯 0.6s (首字 0.2s)'."""
+    stats = f"seg {seg_s:.1f}s · asr {asr_ms / 1000:.1f}s"
+    if tr_ms is not None:
+        stats += f" · 翻譯 {tr_ms / 1000:.1f}s"
+        if tr_first_ms is not None:
+            stats += f" (首字 {tr_first_ms / 1000:.1f}s)"
+    return stats
+
+
+def format_transcript_entry(time_str: str, en: str, zh: str, seg_s: float, asr_ms: float,
+                            tr_ms: float | None, tr_first_ms: float | None) -> str:
+    """One transcript block in the same layout as the terminal output:
+
+        [HH:MM:SS] English sentence
+        → 中文翻譯
+           seg 2.8s · asr 0.5s · 翻譯 0.6s (首字 0.2s)
+    """
+    lines = [f"[{time_str}] {en}"]
+    if zh:
+        lines.append(f"→ {zh}")
+    lines.append(f"   {format_stats(seg_s, asr_ms, tr_ms, tr_first_ms)}")
+    return "\n".join(lines) + "\n\n"
 
 
 # --------------------------------------------------------------------------- audio
@@ -603,12 +628,9 @@ class Display:
         out_dir.mkdir(parents=True, exist_ok=True)
         stamp = datetime.now().strftime("%Y%m%d-%H%M")
         self.jsonl_path = out_dir / f"{stamp}.jsonl"
-        self.md_path = out_dir / f"{stamp}.md"
+        self.txt_path = out_dir / f"{stamp}.txt"
         self.jsonl = open(self.jsonl_path, "a", encoding="utf-8")
-        self.md = open(self.md_path, "a", encoding="utf-8")
-        if self.md.tell() == 0:
-            self.md.write(f"# Meeting transcript {datetime.now():%Y-%m-%d %H:%M}\n\n")
-            self.md.flush()
+        self.txt = open(self.txt_path, "a", encoding="utf-8")
 
     def begin(self, item: Item):
         t = item.wall.strftime("%H:%M:%S")
@@ -640,6 +662,8 @@ class Display:
             sys.stdout.flush()
         if self.bc and self.translate:
             self.bc.publish({"type": "zh", "id": item.id, "text": item.zh, "done": True})
+        tr_ms = round(item.tr_ms) if self.translate else None
+        tr_first_ms = round(item.tr_first_ms) if self.translate else None
         rec = {
             "id": item.id,
             "time": item.wall.isoformat(timespec="seconds"),
@@ -648,15 +672,14 @@ class Display:
             "en": item.en,
             "zh": item.zh,
             "asr_ms": round(item.asr_ms),
-            "tr_ms": round(item.tr_ms),
+            "tr_ms": tr_ms,
+            "tr_first_ms": tr_first_ms,
         }
         self.jsonl.write(json.dumps(rec, ensure_ascii=False) + "\n")
         self.jsonl.flush()
-        t = item.wall.strftime("%H:%M:%S")
-        self.md.write(f"- **{t}** {item.en}\n")
-        if item.zh:
-            self.md.write(f"  {item.zh}\n")
-        self.md.flush()
+        self.txt.write(format_transcript_entry(item.wall.strftime("%H:%M:%S"), item.en, item.zh,
+                                               item.seg.end - item.seg.start, item.asr_ms, tr_ms, tr_first_ms))
+        self.txt.flush()
 
     def error(self, msg: str):
         with self.lock:
@@ -665,7 +688,7 @@ class Display:
 
     def close(self):
         self.jsonl.close()
-        self.md.close()
+        self.txt.close()
 
 
 # --------------------------------------------------------------------------- helpers
@@ -821,7 +844,7 @@ def main() -> int:
             bc = None
 
     display = Display(bc, Path(a.out_dir), translate)
-    print(f"Transcript: {display.md_path}")
+    print(f"Transcript: {display.txt_path}")
 
     device_spec = None if a.file else pick_device(a.device)
     ffmpeg = start_ffmpeg(device_spec, a.file, realtime=not a.fast)
@@ -886,7 +909,8 @@ def main() -> int:
             if item is None:
                 return
             display.begin(item)
-            stats_line = f"seg {item.seg.end - item.seg.start:.1f}s · asr {item.asr_ms / 1000:.1f}s"
+            seg_s = item.seg.end - item.seg.start
+            stats_line = format_stats(seg_s, item.asr_ms, None, None)
             if translator:
                 parts: list[str] = []
                 t0 = time.time()
@@ -912,7 +936,7 @@ def main() -> int:
                         item.meta["converted"] = True
                 if item.zh:
                     history.append((item.en, item.zh))
-                stats_line += f" · 翻譯 {item.tr_ms / 1000:.1f}s (首字 {item.tr_first_ms / 1000:.1f}s)"
+                stats_line = format_stats(seg_s, item.asr_ms, item.tr_ms, item.tr_first_ms)
             display.end(item, stats_line)
 
     threads = [
@@ -942,7 +966,7 @@ def main() -> int:
         if httpd:
             httpd.shutdown()
         display.close()
-        print(f"\nSaved: {display.md_path}\n       {display.jsonl_path}")
+        print(f"\nSaved: {display.txt_path}\n       {display.jsonl_path}")
     return 0
 
 

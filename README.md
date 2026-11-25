@@ -17,7 +17,7 @@
 - **全程離線、私密**：語音辨識與翻譯都在本機，不經過任何雲端服務。
 - **延遲低**：一句話說完後約 2 到 4 秒出現中文；中文逐字浮現，不必等整句。
 - **置頂浮動字幕**：瀏覽器頁面一鍵開成永遠在最上層的小視窗，拖到會議畫面上方。
-- **逐字稿自動存檔**：英文原文加中文翻譯，`.md` 與 `.jsonl` 各一份，會後可丟給 LLM 做摘要。
+- **逐字稿自動存檔**：英文原文加中文翻譯，`.txt`（與終端機畫面相同的排版）與 `.jsonl` 各一份，會後可丟給 LLM 做摘要。
 - **詞彙表**：會前加入專案名、人名、縮寫，辨識更準、譯法一致。
 - **零 Python 依賴**：`live_subs.py` 只用標準函式庫，不用裝任何 pip 套件。
 
@@ -98,7 +98,7 @@ swift tools/create-multi-output.swift --remove   # 不要了就刪掉
 - **浮動置頂視窗**：開一個永遠在最上層的小視窗，拖到會議畫面上方。關掉它字幕會移回分頁。
 - **A− / A+**：調整字體大小（鍵盤 `-` / `+` 亦可）。
 
-終端機同時顯示英文原文、中文翻譯與每句耗時；`Ctrl-C` 結束。逐字稿存在 `transcripts/日期-時間.md` 與 `.jsonl`。
+終端機同時顯示英文原文、中文翻譯與每句耗時；`Ctrl-C` 結束。逐字稿存在 `transcripts/日期-時間.txt`（排版同終端機：時間、英文、中文、每句耗時）與 `.jsonl`（結構化資料）。舊版留下的 `.jsonl` 可用 `python3 tools/export_transcript.py transcripts/日期-時間.jsonl` 轉成 `.txt`。
 
 ### 其他指令
 
@@ -117,7 +117,7 @@ python3 live_subs.py --help       # 全部參數
 ### 會後摘要
 
 ```bash
-./summarize.sh transcripts/20260101-0900.md
+./summarize.sh transcripts/20260101-0900.txt
 ```
 
 用 [Claude Code](https://claude.com/claude-code) 的非互動模式讀逐字稿，依 `prompts/summarize.txt` 產出重點、決策、待辦、未定案問題與「辨識可疑段落」，寫到同名 `-summary.md`。沒有 Claude Code 的話，把 `prompts/summarize.txt` 與逐字稿貼給任何 LLM 即可。
@@ -194,6 +194,7 @@ OLLAMA_MODEL=translategemma:12b ./run.sh start    # ollama pull translategemma:1
 | `models/download.sh` | 下載 whisper 模型 |
 | `models/Modelfile.hy-mt2-*` | Hy-MT2 翻譯模型的 Ollama Modelfile（修正過的對話模板） |
 | `tools/create-multi-output.swift` | 一鍵建立「喇叭 + BlackHole」多重輸出裝置並設為預設輸出 |
+| `tools/export_transcript.py` | 把 `.jsonl` 逐字稿轉成終端機排版的 `.txt` |
 | `summarize.sh`、`prompts/summarize.txt` | 會後摘要 |
 | `config.env.example` | 設定範例（模型、port） |
 | `glossary.example.txt` | 詞彙表範例 |
